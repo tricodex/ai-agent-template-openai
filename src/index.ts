@@ -2,7 +2,6 @@
 import { Request, Response, route } from './httpSupport'
 import OpenAI from 'openai'
 import { z } from 'zod'
-import { zodResponseFormat } from 'openai/helpers/zod'
 
 // Define the structure for the assessment result
 const AssessmentResult = z.object({
@@ -33,24 +32,21 @@ async function GET(req: Request): Promise<Response> {
 
   try {
     // Use OpenAI to assess the content
-    const completion = await openai.beta.chat.completions.parse({
-      model: "gpt-4o-mini", //"gpt-4o-2024-08-06",
-      response_format: zodResponseFormat(AssessmentResult, "assessment"),
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // or "gpt-4o-2024-08-06"
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Specific requirements: ${specificRequirements}\n\nContent to assess: ${content}` }
       ],
+      response_format: { type: "json_object" }
     })
 
-    const assessment = completion.choices[0].message.parsed
-    // Check if assessment is not null before accessing its properties
-    const isValid = assessment ? assessment.isValid : false;
-    const reason = assessment ? assessment.reason : '';
-
+    const assessment = JSON.parse(completion.choices[0].message.content || '{}') as z.infer<typeof AssessmentResult>
+    
     // Prepare the result for attestation
     const attestationResult = {
-      isValid,
-      reason,
+      isValid: assessment.isValid,
+      reason: assessment.reason,
       timestamp: new Date().toISOString(),
       contentHash: await sha256(content),
     }
@@ -71,33 +67,12 @@ async function sha256(message: string) {
   return hashHex
 }
 
-// Handle POST requests
+// Handle POST requests (not implemented, returns 501 Not Implemented)
 async function POST(req: Request): Promise<Response> {
-  // Parse the request body
-  const body = await req.json()
-  
-  // Extract requirements and content from the body
-  const { requirements, content } = body
-
-  if (!requirements || !content) {
-    return new Response(JSON.stringify({ error: 'Missing requirements or content' }), { status: 400 })
-  }
-
-  // Create a new Request object with the extracted data as query parameters
-  const getReq = new Request('', {
-    ...req,
-    method: 'GET',
-    queries: {
-      requirements: [requirements],
-      content: [content]
-    }
-  })
-
-  // Call the GET function with the new request
-  return GET(getReq)
+  return new Response(JSON.stringify({message: 'POST method not implemented'}), { status: 501 })
 }
 
 // Main function to route requests
 export default async function main(request: string) {
   return await route({ GET, POST }, request)
-}   
+}
